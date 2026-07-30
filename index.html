@@ -180,9 +180,11 @@ html[data-theme="dark"] .pair-item{background:var(--surface2)}
         <p class="hint" id="slHint"></p>
       </div>
       <div class="field">
-        <label><span>利確</span><span class="mode-toggle" id="tpModeToggle"><button type="button" data-mode="pips">pips</button><button type="button" data-mode="rr">RR</button></span></label>
+        <label><span>利確</span><span class="mode-toggle" id="tpModeToggle"><button type="button" data-mode="pips">pips</button><button type="button" data-mode="rr">RR</button><button type="button" data-mode="rate">レート</button></span></label>
         <input type="number" id="tpPips" inputmode="decimal" step="0.1" min="0" placeholder="30.0">
         <input type="number" id="rrTarget" inputmode="decimal" step="0.1" min="0" placeholder="例: 2.0（RR 1:2）" hidden>
+        <input type="number" id="tpRateIn" inputmode="decimal" step="any" min="0" placeholder="例: 148.550" hidden>
+        <p class="hint" id="tpHint"></p>
       </div>
     </div>
     <div class="loss-budget" id="lossBudgetRow" hidden>
@@ -318,10 +320,12 @@ const convRateInput = document.getElementById("convRate");
 const entryRateInput = document.getElementById("entryRate");
 const entryRateLabel = document.getElementById("entryRateLabel");
 const slRateInput = document.getElementById("slRate");
+const tpRateInput = document.getElementById("tpRateIn");
 
 function ratesFor(id) {
-  if (!state.rates[id]) state.rates[id] = { entry: "", conv: "", sl: "" };
+  if (!state.rates[id]) state.rates[id] = { entry: "", conv: "", sl: "", tp: "" };
   if (state.rates[id].sl === undefined) state.rates[id].sl = "";
+  if (state.rates[id].tp === undefined) state.rates[id].tp = "";
   return state.rates[id];
 }
 function renderRateFields() {
@@ -335,16 +339,19 @@ function renderRateFields() {
     convRateHint.textContent = `${p.id} の損益を円に換算するため ${p.quote}/JPY のレートを入力してください`;
     convRateInput.value = r.conv;
   }
-  entryRateLabel.textContent = slMode() === "rate"
+  entryRateLabel.textContent = (slMode() === "rate" || tpMode() === "rate")
     ? `${p.id} エントリーレート（レート指定に必須）`
     : `${p.id} 現在レート（任意・証拠金計算用）`;
   entryRateInput.value = r.entry;
   slRateInput.value = r.sl || "";
   slRateInput.placeholder = p.pip >= 0.01 ? "例: 148.100" : "例: 1.08350";
+  tpRateInput.value = r.tp || "";
+  tpRateInput.placeholder = p.pip >= 0.01 ? "例: 148.550" : "例: 1.09350";
 }
 convRateInput.addEventListener("input", () => { ratesFor(state.selected).conv = convRateInput.value; save(); calc(); });
 entryRateInput.addEventListener("input", () => { ratesFor(state.selected).entry = entryRateInput.value; save(); calc(); });
 slRateInput.addEventListener("input", () => { ratesFor(state.selected).sl = slRateInput.value; save(); calc(); });
+tpRateInput.addEventListener("input", () => { ratesFor(state.selected).tp = tpRateInput.value; save(); calc(); });
 
 /* ---------- inputs ---------- */
 const el = id => document.getElementById(id);
@@ -356,7 +363,7 @@ for (const k of inputs) {
 
 /* ---------- 損切り・利確の入力モード ---------- */
 function slMode() { return state.inputs.slMode === "rate" ? "rate" : "pips"; }
-function tpMode() { return state.inputs.tpMode === "rr" ? "rr" : "pips"; }
+function tpMode() { const m = state.inputs.tpMode; return m === "rr" || m === "rate" ? m : "pips"; }
 function renderModes() {
   document.querySelectorAll("#slModeToggle button").forEach(b => b.classList.toggle("on", b.dataset.mode === slMode()));
   document.querySelectorAll("#tpModeToggle button").forEach(b => b.classList.toggle("on", b.dataset.mode === tpMode()));
@@ -364,12 +371,13 @@ function renderModes() {
   el("slRate").hidden = slMode() !== "rate";
   el("tpPips").hidden = tpMode() !== "pips";
   el("rrTarget").hidden = tpMode() !== "rr";
+  el("tpRateIn").hidden = tpMode() !== "rate";
 }
 document.querySelectorAll("#slModeToggle button").forEach(b => b.addEventListener("click", () => {
   state.inputs.slMode = b.dataset.mode; save(); renderModes(); renderRateFields(); calc();
 }));
 document.querySelectorAll("#tpModeToggle button").forEach(b => b.addEventListener("click", () => {
-  state.inputs.tpMode = b.dataset.mode; save(); renderModes(); calc();
+  state.inputs.tpMode = b.dataset.mode; save(); renderModes(); renderRateFields(); calc();
 }));
 renderModes();
 
@@ -404,8 +412,23 @@ function calc() {
 
   // 利確目標（pips）とRRを決定
   let tpPips = null, rr = null;
+  el("tpHint").textContent = "";
   if (tpMode() === "rr") {
     if (rrTarget && slPips) { rr = rrTarget; tpPips = slPips * rrTarget; }
+  } else if (tpMode() === "rate") {
+    const tpRateVal = num(r.tp);
+    if (tpRateVal && !entry) {
+      el("tpHint").textContent = "エントリーレートを入力すると利確幅を計算します";
+    } else if (entry && tpRateVal && tpRateVal !== entry) {
+      if (direction && (direction === "long" ? tpRateVal < entry : tpRateVal > entry)) {
+        el("tpHint").textContent = "利確レートが損切りと同じ側にあります（レートを確認してください）";
+      } else {
+        if (!direction) direction = tpRateVal > entry ? "long" : "short";
+        tpPips = Math.abs(tpRateVal - entry) / p.pip;
+        if (slPips) rr = tpPips / slPips;
+        el("tpHint").textContent = `利確幅 ${tpPips.toFixed(1)} pips`;
+      }
+    }
   } else {
     tpPips = num(state.inputs.tpPips);
     if (tpPips && slPips) rr = tpPips / slPips;
