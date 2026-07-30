@@ -1,0 +1,482 @@
+<!DOCTYPE html>
+<html lang="ja" data-theme="dark">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<title>FXロット計算</title>
+<meta name="description" content="リスク%と損切りpipsから推奨ロット数を算出するFX資金管理ツール">
+<link rel="manifest" href="./manifest.json">
+<link rel="icon" href="./icon-192.png">
+<link rel="apple-touch-icon" href="./icon-192.png">
+<meta name="theme-color" content="#191919">
+<style>
+:root{
+  --canvas:#FFFFFF; --surface:#F9F8F7; --surface2:#F0EFED; --raised:#FFFFFF;
+  --text:#2C2C2B; --text2:#7D7A75; --border:#E6E5E3;
+  --accent:#2783DE; --accent-soft:#E5F2FC;
+  --green:#46A171; --green-soft:#E8F1EC;
+  --orange:#D5803B; --orange-soft:#FBEBDE;
+  --red:#E56458; --red-soft:#FCE9E7;
+  --shadow:0 1px 2px rgba(0,0,0,.05),0 4px 12px rgba(0,0,0,.04);
+}
+html[data-theme="dark"]{
+  --canvas:#191919; --surface:#202020; --surface2:#262626; --raised:#383836;
+  --text:#FFFFFF; --text2:rgba(255,255,255,.65); --border:rgba(255,255,255,.20);
+  --accent:#5E9FE8; --accent-soft:rgba(94,159,232,.12);
+  --green:#72BC8F; --green-soft:rgba(114,188,143,.12);
+  --orange:#DE9255; --orange-soft:rgba(222,146,85,.12);
+  --red:#E97366; --red-soft:rgba(233,115,102,.12);
+  --shadow:none;
+}
+*{box-sizing:border-box;margin:0;padding:0}
+[hidden]{display:none!important}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Hiragino Kaku Gothic ProN","Noto Sans JP",Meiryo,sans-serif;
+  background:var(--canvas);color:var(--text);font-size:16px;line-height:1.5;
+  min-height:100vh;padding-bottom:48px;
+}
+.wrap{max-width:520px;margin:0 auto;padding:16px 16px 0}
+header{display:flex;align-items:center;justify-content:space-between;padding:8px 0 16px}
+header h1{font-size:18px;font-weight:700;display:flex;align-items:center;gap:8px}
+header h1 .logo{width:28px;height:28px;border-radius:6px}
+.header-btns{display:flex;gap:8px}
+.icon-btn{
+  min-width:44px;min-height:44px;border:1px solid var(--border);border-radius:8px;
+  background:var(--surface);color:var(--text);font-size:18px;cursor:pointer;
+  display:flex;align-items:center;justify-content:center;padding:0 10px;
+}
+.icon-btn:hover{background:var(--surface2)}
+.card{
+  background:var(--surface);border:1px solid var(--border);border-radius:12px;
+  padding:16px;margin-bottom:12px;box-shadow:var(--shadow);
+}
+.card h2{font-size:13px;font-weight:600;color:var(--text2);letter-spacing:.04em;margin-bottom:12px}
+.pair-row{display:flex;gap:8px}
+.pair-row select{flex:1}
+select,input[type="number"],input[type="text"]{
+  width:100%;min-height:44px;padding:8px 12px;font-size:16px;
+  border:1px solid var(--border);border-radius:8px;
+  background:var(--canvas);color:var(--text);
+  appearance:none;-webkit-appearance:none;
+}
+html[data-theme="dark"] select,html[data-theme="dark"] input{background:var(--surface2)}
+select:focus,input:focus{outline:2px solid var(--accent);outline-offset:1px;border-color:transparent}
+.select-wrap{position:relative;flex:1}
+.select-wrap::after{
+  content:"▾";position:absolute;right:12px;top:50%;transform:translateY(-50%);
+  color:var(--text2);pointer-events:none;font-size:13px;
+}
+.field{margin-bottom:12px}
+.field:last-child{margin-bottom:0}
+.field label{display:flex;justify-content:space-between;align-items:baseline;font-size:14px;color:var(--text2);margin-bottom:4px}
+.field label .unit{font-size:12px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+.hint{font-size:13px;color:var(--text2);margin-top:6px}
+.loss-budget{
+  margin-top:12px;padding:10px 12px;border-radius:8px;background:var(--accent-soft);
+  font-size:14px;display:flex;justify-content:space-between;align-items:center;
+}
+.loss-budget b{font-size:16px}
+.result-card{border:1px solid var(--border)}
+.result-main{
+  text-align:center;padding:12px 0 16px;border-bottom:1px solid var(--border);margin-bottom:12px;
+}
+.result-main .label{font-size:13px;color:var(--text2)}
+.result-main .qty{font-size:36px;font-weight:700;letter-spacing:.01em;line-height:1.2;margin:2px 0}
+.result-main .qty small{font-size:16px;font-weight:600;color:var(--text2)}
+.result-main .sub{font-size:14px;color:var(--text2)}
+.result-rows{display:grid;gap:8px}
+.rrow{display:flex;justify-content:space-between;align-items:center;font-size:14px}
+.rrow .k{color:var(--text2)}
+.rrow .v{font-weight:600;font-variant-numeric:tabular-nums}
+.badge{padding:2px 10px;border-radius:999px;font-size:13px;font-weight:600}
+.badge.good{background:var(--green-soft);color:var(--green)}
+.badge.warn{background:var(--red-soft);color:var(--red)}
+.empty-note{text-align:center;color:var(--text2);font-size:14px;padding:8px 0}
+footer{max-width:520px;margin:0 auto;padding:4px 16px 16px;font-size:12px;color:var(--text2);text-align:center}
+/* modal */
+dialog{
+  border:1px solid var(--border);border-radius:12px;background:var(--surface);color:var(--text);
+  width:min(92vw,440px);padding:20px;margin:auto;
+}
+dialog::backdrop{background:rgba(0,0,0,.5)}
+dialog h3{font-size:16px;margin-bottom:12px}
+.pair-list{display:grid;gap:8px;margin-bottom:16px}
+.pair-item{
+  display:flex;align-items:center;justify-content:space-between;gap:8px;
+  border:1px solid var(--border);border-radius:8px;padding:8px 8px 8px 12px;background:var(--canvas);
+}
+html[data-theme="dark"] .pair-item{background:var(--surface2)}
+.pair-item .name{font-weight:600}
+.pair-item .pipdef{font-size:12px;color:var(--text2)}
+.del-btn{
+  min-width:44px;min-height:44px;border:none;border-radius:8px;background:transparent;
+  color:var(--red);font-size:14px;cursor:pointer;
+}
+.del-btn:hover{background:var(--red-soft)}
+.add-form{border-top:1px solid var(--border);padding-top:16px}
+.add-form .grid2{margin-bottom:12px}
+.btn{
+  min-height:44px;padding:0 20px;border-radius:8px;border:none;cursor:pointer;
+  font-size:15px;font-weight:600;
+}
+.btn.primary{background:var(--accent);color:#fff}
+.btn.ghost{background:transparent;color:var(--text2);border:1px solid var(--border)}
+.modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
+.form-error{color:var(--red);font-size:13px;margin-bottom:8px;display:none}
+@media (max-width:360px){.grid2{grid-template-columns:1fr}}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <header>
+    <h1><img class="logo" src="./icon-192.png" alt="">FXロット計算</h1>
+    <div class="header-btns">
+      <button id="pairBtn" class="icon-btn" title="通貨ペアを管理" aria-label="通貨ペアを管理">⚙</button>
+      <button id="themeBtn" class="icon-btn" title="テーマ切り替え" aria-label="テーマ切り替え">☀</button>
+    </div>
+  </header>
+
+  <section class="card">
+    <h2>通貨ペア</h2>
+    <div class="pair-row">
+      <div class="select-wrap">
+        <select id="pairSelect" aria-label="通貨ペア"></select>
+      </div>
+    </div>
+    <div id="rateFields" style="margin-top:12px">
+      <div class="field" id="convRateField" hidden>
+        <label><span id="convRateLabel">換算レート</span><span class="unit">円</span></label>
+        <input type="number" id="convRate" inputmode="decimal" step="any" min="0" placeholder="例: 148.25">
+        <p class="hint" id="convRateHint"></p>
+      </div>
+      <div class="field">
+        <label><span id="entryRateLabel">現在レート（任意・証拠金計算用）</span></label>
+        <input type="number" id="entryRate" inputmode="decimal" step="any" min="0" placeholder="例: 148.250">
+      </div>
+    </div>
+  </section>
+
+  <section class="card">
+    <h2>資金・リスク設定</h2>
+    <div class="grid2">
+      <div class="field">
+        <label><span>口座残高</span><span class="unit">円</span></label>
+        <input type="number" id="balance" inputmode="numeric" step="any" min="0" placeholder="1000000">
+      </div>
+      <div class="field">
+        <label><span>リスク</span><span class="unit">%</span></label>
+        <input type="number" id="riskPct" inputmode="decimal" step="0.1" min="0" placeholder="2.0">
+      </div>
+      <div class="field">
+        <label><span>損切り幅</span><span class="unit">pips</span></label>
+        <input type="number" id="slPips" inputmode="decimal" step="0.1" min="0" placeholder="15.0">
+      </div>
+      <div class="field">
+        <label><span>利確目標</span><span class="unit">pips</span></label>
+        <input type="number" id="tpPips" inputmode="decimal" step="0.1" min="0" placeholder="30.0">
+      </div>
+    </div>
+    <div class="loss-budget" id="lossBudgetRow" hidden>
+      <span>許容損失額</span><b id="lossBudget">—</b>
+    </div>
+  </section>
+
+  <section class="card result-card" aria-live="polite">
+    <h2>計算結果</h2>
+    <div id="resultBody">
+      <div class="result-main">
+        <div class="label">推奨数量（1,000通貨単位切り捨て）</div>
+        <div class="qty" id="qty">—</div>
+        <div class="sub" id="qtySub"></div>
+      </div>
+      <div class="result-rows">
+        <div class="rrow"><span class="k">想定損失（切り捨て後）</span><span class="v" id="actualLoss">—</span></div>
+        <div class="rrow"><span class="k">実効リスク</span><span class="v" id="effRisk">—</span></div>
+        <div class="rrow"><span class="k">利確時の想定利益</span><span class="v" id="profit">—</span></div>
+        <div class="rrow"><span class="k">リスクリワード</span><span class="v" id="rr">—</span></div>
+        <div class="rrow"><span class="k">必要証拠金（レバ25倍）</span><span class="v" id="margin">—</span></div>
+      </div>
+      <p class="empty-note" id="emptyNote">残高・リスク%・損切り幅を入力すると自動計算されます</p>
+    </div>
+  </section>
+</div>
+
+<footer>計算はすべて端末内で行われ、外部送信はありません。<br>結果は概算です。発注前に必ずブローカーの表示で最終確認してください。</footer>
+
+<dialog id="pairDialog">
+  <h3>通貨ペアの管理</h3>
+  <div class="pair-list" id="pairList"></div>
+  <div class="add-form">
+    <h3>ペアを追加</h3>
+    <p class="form-error" id="addError"></p>
+    <div class="grid2">
+      <div class="field">
+        <label><span>基軸通貨</span></label>
+        <input type="text" id="addBase" maxlength="3" placeholder="AUD" autocapitalize="characters">
+      </div>
+      <div class="field">
+        <label><span>決済通貨</span></label>
+        <input type="text" id="addQuote" maxlength="3" placeholder="JPY" autocapitalize="characters">
+      </div>
+    </div>
+    <div class="field">
+      <label><span>1pipsの値幅（空欄で自動判定）</span></label>
+      <input type="number" id="addPip" inputmode="decimal" step="any" min="0" placeholder="対円: 0.01 ／ その他: 0.0001">
+    </div>
+    <div class="modal-actions">
+      <button class="btn ghost" id="closeDialog">閉じる</button>
+      <button class="btn primary" id="addPairBtn">追加</button>
+    </div>
+  </div>
+</dialog>
+
+<script>
+"use strict";
+const LS_KEY = "fxlot-v1";
+const UNIT_STEP = 1000;      // 1,000通貨単位
+const LEVERAGE = 25;
+
+const DEFAULT_PAIRS = [
+  { id: "USD/JPY", base: "USD", quote: "JPY", pip: 0.01 },
+  { id: "EUR/JPY", base: "EUR", quote: "JPY", pip: 0.01 },
+  { id: "GBP/JPY", base: "GBP", quote: "JPY", pip: 0.01 },
+  { id: "EUR/USD", base: "EUR", quote: "USD", pip: 0.0001 },
+];
+
+let state = load();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(LS_KEY);
+    if (raw) {
+      const s = JSON.parse(raw);
+      if (Array.isArray(s.pairs) && s.pairs.length) return s;
+    }
+  } catch (e) { /* ignore */ }
+  return {
+    theme: null,
+    pairs: JSON.parse(JSON.stringify(DEFAULT_PAIRS)),
+    selected: "USD/JPY",
+    inputs: { balance: "", riskPct: "", slPips: "", tpPips: "" },
+    rates: {},   // pairId -> { entry: "", conv: "" }
+  };
+}
+function save() { try { localStorage.setItem(LS_KEY, JSON.stringify(state)); } catch (e) { /* ignore */ } }
+
+/* ---------- theme ---------- */
+const themeBtn = document.getElementById("themeBtn");
+function currentTheme() {
+  if (state.theme) return state.theme;
+  return window.matchMedia && window.matchMedia("(prefers-color-scheme: light)").matches ? "light" : "dark";
+}
+function applyTheme() {
+  const t = currentTheme();
+  document.documentElement.setAttribute("data-theme", t);
+  themeBtn.textContent = t === "dark" ? "☀" : "☾";
+  themeBtn.title = t === "dark" ? "ライトモードへ" : "ダークモードへ";
+  const meta = document.querySelector('meta[name="theme-color"]');
+  if (meta) meta.setAttribute("content", t === "dark" ? "#191919" : "#FFFFFF");
+}
+themeBtn.addEventListener("click", () => {
+  state.theme = currentTheme() === "dark" ? "light" : "dark";
+  save(); applyTheme();
+});
+
+/* ---------- pairs ---------- */
+const pairSelect = document.getElementById("pairSelect");
+function getPair(id) { return state.pairs.find(p => p.id === id); }
+function renderPairSelect() {
+  pairSelect.innerHTML = "";
+  for (const p of state.pairs) {
+    const opt = document.createElement("option");
+    opt.value = p.id; opt.textContent = p.id;
+    pairSelect.appendChild(opt);
+  }
+  if (!getPair(state.selected)) state.selected = state.pairs[0].id;
+  pairSelect.value = state.selected;
+}
+pairSelect.addEventListener("change", () => {
+  state.selected = pairSelect.value;
+  save(); renderRateFields(); calc();
+});
+
+/* ---------- rate fields ---------- */
+const convRateField = document.getElementById("convRateField");
+const convRateLabel = document.getElementById("convRateLabel");
+const convRateHint = document.getElementById("convRateHint");
+const convRateInput = document.getElementById("convRate");
+const entryRateInput = document.getElementById("entryRate");
+const entryRateLabel = document.getElementById("entryRateLabel");
+
+function ratesFor(id) {
+  if (!state.rates[id]) state.rates[id] = { entry: "", conv: "" };
+  return state.rates[id];
+}
+function renderRateFields() {
+  const p = getPair(state.selected);
+  const r = ratesFor(p.id);
+  if (p.quote === "JPY") {
+    convRateField.hidden = true;
+  } else {
+    convRateField.hidden = false;
+    convRateLabel.textContent = `換算レート ${p.quote}/JPY（必須）`;
+    convRateHint.textContent = `${p.id} の損益を円に換算するため ${p.quote}/JPY のレートを入力してください`;
+    convRateInput.value = r.conv;
+  }
+  entryRateLabel.textContent = `${p.id} 現在レート（任意・証拠金計算用）`;
+  entryRateInput.value = r.entry;
+}
+convRateInput.addEventListener("input", () => { ratesFor(state.selected).conv = convRateInput.value; save(); calc(); });
+entryRateInput.addEventListener("input", () => { ratesFor(state.selected).entry = entryRateInput.value; save(); calc(); });
+
+/* ---------- inputs ---------- */
+const el = id => document.getElementById(id);
+const inputs = ["balance", "riskPct", "slPips", "tpPips"];
+for (const k of inputs) {
+  el(k).value = state.inputs[k] || "";
+  el(k).addEventListener("input", () => { state.inputs[k] = el(k).value; save(); calc(); });
+}
+
+/* ---------- calc ---------- */
+const fmtY = n => Math.round(n).toLocaleString("ja-JP") + "円";
+const num = v => { const n = parseFloat(v); return isFinite(n) && n > 0 ? n : null; };
+
+function calc() {
+  const p = getPair(state.selected);
+  const r = ratesFor(p.id);
+  const balance = num(state.inputs.balance);
+  const riskPct = num(state.inputs.riskPct);
+  const slPips = num(state.inputs.slPips);
+  const tpPips = num(state.inputs.tpPips);
+  const conv = p.quote === "JPY" ? 1 : num(r.conv);
+  const entry = num(r.entry);
+
+  const budgetRow = el("lossBudgetRow");
+  if (balance && riskPct) {
+    budgetRow.hidden = false;
+    el("lossBudget").textContent = fmtY(balance * riskPct / 100);
+  } else {
+    budgetRow.hidden = true;
+  }
+
+  const ready = balance && riskPct && slPips && conv;
+  el("emptyNote").style.display = ready ? "none" : "";
+
+  if (!ready) {
+    for (const id of ["qty", "actualLoss", "effRisk", "profit", "rr", "margin"]) el(id).textContent = "—";
+    el("rr").className = "v";
+    el("qtySub").textContent = p.quote !== "JPY" && !conv ? `${p.quote}/JPY の換算レートを入力してください` : "";
+    return;
+  }
+
+  const lossBudget = balance * riskPct / 100;
+  const pipValuePerUnit = p.pip * conv;              // 円/pips（1通貨あたり）
+  const rawQty = lossBudget / (slPips * pipValuePerUnit);
+  const qty = Math.floor(rawQty / UNIT_STEP) * UNIT_STEP;
+
+  if (qty <= 0) {
+    el("qty").textContent = "0通貨";
+    el("qtySub").textContent = "許容損失に対して損切り幅が大きすぎます";
+    for (const id of ["actualLoss", "effRisk", "profit", "rr", "margin"]) el(id).textContent = "—";
+    el("rr").className = "v";
+    return;
+  }
+
+  const man = qty / 10000;
+  el("qty").innerHTML = qty.toLocaleString("ja-JP") + '<small> 通貨</small>';
+  el("qtySub").textContent = `${man % 1 === 0 ? man : man.toFixed(1)}万通貨`;
+
+  const actualLoss = qty * slPips * pipValuePerUnit;
+  el("actualLoss").textContent = "-" + fmtY(actualLoss);
+  el("effRisk").textContent = (actualLoss / balance * 100).toFixed(2) + "%";
+
+  if (tpPips) {
+    el("profit").textContent = "+" + fmtY(qty * tpPips * pipValuePerUnit);
+    const rr = tpPips / slPips;
+    const rrEl = el("rr");
+    rrEl.innerHTML = `<span class="badge ${rr >= 1 ? "good" : "warn"}">1 : ${rr.toFixed(2)}${rr < 1 ? "（1未満）" : ""}</span>`;
+  } else {
+    el("profit").textContent = "—";
+    el("rr").textContent = "—";
+    el("rr").className = "v";
+  }
+
+  if (entry) {
+    const notionalJPY = qty * entry * (p.quote === "JPY" ? 1 : conv);
+    el("margin").textContent = "約" + fmtY(notionalJPY / LEVERAGE);
+  } else {
+    el("margin").textContent = "レート未入力";
+  }
+}
+
+/* ---------- pair management ---------- */
+const dialog = document.getElementById("pairDialog");
+const pairList = document.getElementById("pairList");
+const addError = document.getElementById("addError");
+document.getElementById("pairBtn").addEventListener("click", () => { renderPairList(); dialog.showModal(); });
+document.getElementById("closeDialog").addEventListener("click", () => dialog.close());
+dialog.addEventListener("click", e => { if (e.target === dialog) dialog.close(); });
+
+function renderPairList() {
+  pairList.innerHTML = "";
+  for (const p of state.pairs) {
+    const item = document.createElement("div");
+    item.className = "pair-item";
+    const info = document.createElement("div");
+    info.innerHTML = `<div class="name">${p.id}</div><div class="pipdef">1pips = ${p.pip}</div>`;
+    item.appendChild(info);
+    const del = document.createElement("button");
+    del.className = "del-btn"; del.textContent = "削除";
+    del.setAttribute("aria-label", `${p.id}を削除`);
+    del.disabled = state.pairs.length <= 1;
+    if (del.disabled) del.style.opacity = ".4";
+    del.addEventListener("click", () => {
+      state.pairs = state.pairs.filter(x => x.id !== p.id);
+      delete state.rates[p.id];
+      if (state.selected === p.id) state.selected = state.pairs[0].id;
+      save(); renderPairSelect(); renderRateFields(); renderPairList(); calc();
+    });
+    item.appendChild(del);
+    pairList.appendChild(item);
+  }
+}
+
+document.getElementById("addPairBtn").addEventListener("click", () => {
+  const base = el("addBase").value.trim().toUpperCase();
+  const quote = el("addQuote").value.trim().toUpperCase();
+  const pipRaw = el("addPip").value.trim();
+  addError.style.display = "none";
+  const err = msg => { addError.textContent = msg; addError.style.display = "block"; };
+  if (!/^[A-Z]{3}$/.test(base) || !/^[A-Z]{3}$/.test(quote)) return err("通貨コードは3文字の英字で入力してください（例: AUD）");
+  if (base === quote) return err("基軸通貨と決済通貨が同じです");
+  const id = `${base}/${quote}`;
+  if (getPair(id)) return err(`${id} はすでに登録されています`);
+  let pip = quote === "JPY" ? 0.01 : 0.0001;
+  if (pipRaw) {
+    const v = parseFloat(pipRaw);
+    if (!isFinite(v) || v <= 0) return err("1pipsの値幅は正の数値で入力してください");
+    pip = v;
+  }
+  state.pairs.push({ id, base, quote, pip });
+  state.selected = id;
+  save();
+  el("addBase").value = ""; el("addQuote").value = ""; el("addPip").value = "";
+  renderPairSelect(); renderRateFields(); renderPairList(); calc();
+  dialog.close();
+});
+
+/* ---------- init ---------- */
+applyTheme();
+renderPairSelect();
+renderRateFields();
+calc();
+
+if ("serviceWorker" in navigator) {
+  window.addEventListener("load", () => {
+    navigator.serviceWorker.register("./sw.js").catch(() => { /* ignore */ });
+  });
+}
+</script>
+</body>
+</html>
