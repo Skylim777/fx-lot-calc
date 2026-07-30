@@ -6,8 +6,10 @@
 <title>FXロット計算</title>
 <meta name="description" content="リスク%と損切りpipsから推奨ロット数を算出するFX資金管理ツール">
 <link rel="manifest" href="./manifest.json">
-<link rel="icon" href="./icon-192.png">
-<link rel="apple-touch-icon" href="./icon-192.png">
+<link rel="icon" type="image/png" href="./icon-192.png">
+<link rel="apple-touch-icon" sizes="180x180" href="./apple-touch-icon.png">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-title" content="ロット計算">
 <meta name="theme-color" content="#191919">
 <style>
 :root{
@@ -125,6 +127,9 @@ html[data-theme="dark"] .pair-item{background:var(--surface2)}
 .modal-actions{display:flex;justify-content:flex-end;gap:8px;margin-top:16px}
 .form-error{color:var(--red);font-size:13px;margin-bottom:8px;display:none}
 @media (max-width:360px){.grid2{grid-template-columns:1fr}}
+.mode-toggle{display:inline-flex;border:1px solid var(--border);border-radius:6px;overflow:hidden;margin-left:auto}
+.mode-toggle button{border:0;background:transparent;color:var(--text2);font:inherit;font-size:11px;padding:2px 9px;cursor:pointer}
+.mode-toggle button.on{background:var(--accent-soft);color:var(--accent);font-weight:600}
 </style>
 </head>
 <body>
@@ -169,12 +174,15 @@ html[data-theme="dark"] .pair-item{background:var(--surface2)}
         <input type="number" id="riskPct" inputmode="decimal" step="0.1" min="0" placeholder="2.0">
       </div>
       <div class="field">
-        <label><span>損切り幅</span><span class="unit">pips</span></label>
+        <label><span>損切り</span><span class="mode-toggle" id="slModeToggle"><button type="button" data-mode="pips">pips</button><button type="button" data-mode="rate">レート</button></span></label>
         <input type="number" id="slPips" inputmode="decimal" step="0.1" min="0" placeholder="15.0">
+        <input type="number" id="slRate" inputmode="decimal" step="any" min="0" placeholder="例: 148.100" hidden>
+        <p class="hint" id="slHint"></p>
       </div>
       <div class="field">
-        <label><span>利確目標</span><span class="unit">pips</span></label>
+        <label><span>利確</span><span class="mode-toggle" id="tpModeToggle"><button type="button" data-mode="pips">pips</button><button type="button" data-mode="rr">RR</button></span></label>
         <input type="number" id="tpPips" inputmode="decimal" step="0.1" min="0" placeholder="30.0">
+        <input type="number" id="rrTarget" inputmode="decimal" step="0.1" min="0" placeholder="例: 2.0（RR 1:2）" hidden>
       </div>
     </div>
     <div class="loss-budget" id="lossBudgetRow" hidden>
@@ -195,6 +203,7 @@ html[data-theme="dark"] .pair-item{background:var(--surface2)}
         <div class="rrow"><span class="k">実効リスク</span><span class="v" id="effRisk">—</span></div>
         <div class="rrow"><span class="k">利確時の想定利益</span><span class="v" id="profit">—</span></div>
         <div class="rrow"><span class="k">リスクリワード</span><span class="v" id="rr">—</span></div>
+        <div class="rrow"><span class="k">利確目標レート</span><span class="v" id="tpRate">—</span></div>
         <div class="rrow"><span class="k">必要証拠金（レバ25倍）</span><span class="v" id="margin">—</span></div>
       </div>
       <p class="empty-note" id="emptyNote">残高・リスク%・損切り幅を入力すると自動計算されます</p>
@@ -258,7 +267,7 @@ function load() {
     theme: null,
     pairs: JSON.parse(JSON.stringify(DEFAULT_PAIRS)),
     selected: "USD/JPY",
-    inputs: { balance: "", riskPct: "", slPips: "", tpPips: "" },
+    inputs: { balance: "", riskPct: "", slPips: "", tpPips: "", rrTarget: "", slMode: "pips", tpMode: "pips" },
     rates: {},   // pairId -> { entry: "", conv: "" }
   };
 }
@@ -308,9 +317,11 @@ const convRateHint = document.getElementById("convRateHint");
 const convRateInput = document.getElementById("convRate");
 const entryRateInput = document.getElementById("entryRate");
 const entryRateLabel = document.getElementById("entryRateLabel");
+const slRateInput = document.getElementById("slRate");
 
 function ratesFor(id) {
-  if (!state.rates[id]) state.rates[id] = { entry: "", conv: "" };
+  if (!state.rates[id]) state.rates[id] = { entry: "", conv: "", sl: "" };
+  if (state.rates[id].sl === undefined) state.rates[id].sl = "";
   return state.rates[id];
 }
 function renderRateFields() {
@@ -324,19 +335,43 @@ function renderRateFields() {
     convRateHint.textContent = `${p.id} の損益を円に換算するため ${p.quote}/JPY のレートを入力してください`;
     convRateInput.value = r.conv;
   }
-  entryRateLabel.textContent = `${p.id} 現在レート（任意・証拠金計算用）`;
+  entryRateLabel.textContent = slMode() === "rate"
+    ? `${p.id} エントリーレート（レート指定に必須）`
+    : `${p.id} 現在レート（任意・証拠金計算用）`;
   entryRateInput.value = r.entry;
+  slRateInput.value = r.sl || "";
+  slRateInput.placeholder = p.pip >= 0.01 ? "例: 148.100" : "例: 1.08350";
 }
 convRateInput.addEventListener("input", () => { ratesFor(state.selected).conv = convRateInput.value; save(); calc(); });
 entryRateInput.addEventListener("input", () => { ratesFor(state.selected).entry = entryRateInput.value; save(); calc(); });
+slRateInput.addEventListener("input", () => { ratesFor(state.selected).sl = slRateInput.value; save(); calc(); });
 
 /* ---------- inputs ---------- */
 const el = id => document.getElementById(id);
-const inputs = ["balance", "riskPct", "slPips", "tpPips"];
+const inputs = ["balance", "riskPct", "slPips", "tpPips", "rrTarget"];
 for (const k of inputs) {
   el(k).value = state.inputs[k] || "";
   el(k).addEventListener("input", () => { state.inputs[k] = el(k).value; save(); calc(); });
 }
+
+/* ---------- 損切り・利確の入力モード ---------- */
+function slMode() { return state.inputs.slMode === "rate" ? "rate" : "pips"; }
+function tpMode() { return state.inputs.tpMode === "rr" ? "rr" : "pips"; }
+function renderModes() {
+  document.querySelectorAll("#slModeToggle button").forEach(b => b.classList.toggle("on", b.dataset.mode === slMode()));
+  document.querySelectorAll("#tpModeToggle button").forEach(b => b.classList.toggle("on", b.dataset.mode === tpMode()));
+  el("slPips").hidden = slMode() !== "pips";
+  el("slRate").hidden = slMode() !== "rate";
+  el("tpPips").hidden = tpMode() !== "pips";
+  el("rrTarget").hidden = tpMode() !== "rr";
+}
+document.querySelectorAll("#slModeToggle button").forEach(b => b.addEventListener("click", () => {
+  state.inputs.slMode = b.dataset.mode; save(); renderModes(); renderRateFields(); calc();
+}));
+document.querySelectorAll("#tpModeToggle button").forEach(b => b.addEventListener("click", () => {
+  state.inputs.tpMode = b.dataset.mode; save(); renderModes(); calc();
+}));
+renderModes();
 
 /* ---------- calc ---------- */
 const fmtY = n => Math.round(n).toLocaleString("ja-JP") + "円";
@@ -347,10 +382,34 @@ function calc() {
   const r = ratesFor(p.id);
   const balance = num(state.inputs.balance);
   const riskPct = num(state.inputs.riskPct);
-  const slPips = num(state.inputs.slPips);
-  const tpPips = num(state.inputs.tpPips);
   const conv = p.quote === "JPY" ? 1 : num(r.conv);
   const entry = num(r.entry);
+  const slRate = num(r.sl);
+  const rrTarget = num(state.inputs.rrTarget);
+
+  // 損切り幅（pips）と方向を決定
+  let slPips = null, direction = null;
+  el("slHint").textContent = "";
+  if (slMode() === "rate") {
+    if (entry && slRate && entry !== slRate) {
+      slPips = Math.abs(entry - slRate) / p.pip;
+      direction = entry > slRate ? "long" : "short";
+      el("slHint").textContent = `損切り幅 ${slPips.toFixed(1)} pips ・ ${direction === "long" ? "ロング（買い）" : "ショート（売り）"}想定`;
+    } else if (slRate && !entry) {
+      el("slHint").textContent = "エントリーレートを入力すると損切り幅を計算します";
+    }
+  } else {
+    slPips = num(state.inputs.slPips);
+  }
+
+  // 利確目標（pips）とRRを決定
+  let tpPips = null, rr = null;
+  if (tpMode() === "rr") {
+    if (rrTarget && slPips) { rr = rrTarget; tpPips = slPips * rrTarget; }
+  } else {
+    tpPips = num(state.inputs.tpPips);
+    if (tpPips && slPips) rr = tpPips / slPips;
+  }
 
   const budgetRow = el("lossBudgetRow");
   if (balance && riskPct) {
@@ -364,7 +423,7 @@ function calc() {
   el("emptyNote").style.display = ready ? "none" : "";
 
   if (!ready) {
-    for (const id of ["qty", "actualLoss", "effRisk", "profit", "rr", "margin"]) el(id).textContent = "—";
+    for (const id of ["qty", "actualLoss", "effRisk", "profit", "rr", "tpRate", "margin"]) el(id).textContent = "—";
     el("rr").className = "v";
     el("qtySub").textContent = p.quote !== "JPY" && !conv ? `${p.quote}/JPY の換算レートを入力してください` : "";
     return;
@@ -378,7 +437,7 @@ function calc() {
   if (qty <= 0) {
     el("qty").textContent = "0通貨";
     el("qtySub").textContent = "許容損失に対して損切り幅が大きすぎます";
-    for (const id of ["actualLoss", "effRisk", "profit", "rr", "margin"]) el(id).textContent = "—";
+    for (const id of ["actualLoss", "effRisk", "profit", "rr", "tpRate", "margin"]) el(id).textContent = "—";
     el("rr").className = "v";
     return;
   }
@@ -391,15 +450,24 @@ function calc() {
   el("actualLoss").textContent = "-" + fmtY(actualLoss);
   el("effRisk").textContent = (actualLoss / balance * 100).toFixed(2) + "%";
 
-  if (tpPips) {
+  if (tpPips && rr) {
     el("profit").textContent = "+" + fmtY(qty * tpPips * pipValuePerUnit);
-    const rr = tpPips / slPips;
     const rrEl = el("rr");
     rrEl.innerHTML = `<span class="badge ${rr >= 1 ? "good" : "warn"}">1 : ${rr.toFixed(2)}${rr < 1 ? "（1未満）" : ""}</span>`;
   } else {
     el("profit").textContent = "—";
     el("rr").textContent = "—";
     el("rr").className = "v";
+  }
+
+  // 利確目標レート（損切りをレート指定していて方向が分かる場合）
+  if (direction && entry && tpPips) {
+    const sign = direction === "long" ? 1 : -1;
+    const tpRateVal = entry + sign * tpPips * p.pip;
+    const dec = Math.max(0, Math.round(-Math.log10(p.pip)) + 1);
+    el("tpRate").textContent = tpRateVal.toFixed(dec);
+  } else {
+    el("tpRate").textContent = "—";
   }
 
   if (entry) {
