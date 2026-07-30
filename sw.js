@@ -1,4 +1,4 @@
-const CACHE = "fx-lot-calc-v2";
+const CACHE = "fx-lot-calc-v3";
 const ASSETS = [
   "./",
   "./index.html",
